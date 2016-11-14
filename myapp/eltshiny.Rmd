@@ -1,0 +1,443 @@
+---
+title: "ELT Study"
+runtime: shiny
+#output: html_document
+output: 
+    flexdashboard::flex_dashboard:
+           vertical_layout: scroll
+           orientation: rows
+---
+
+```{r, echo = FALSE}
+library(flexdashboard)
+library(highcharter)
+#library(devtools)
+library(shiny)
+library(DT) ## tem que vir depois do shiny
+library(dplyr)
+library(readr)
+#path <<- renderText({input$file1$datapath})
+```
+
+Loading Data {data-orientation=rows}
+=====================================
+
+Row {data-height=100}
+-------------------------------------
+
+```{r}
+ fileInput('file1', 'Choose CSV File',
+   accept=c('text/csv',
+     'text/comma-separated-values,text/plain',
+     '.csv'))
+
+#plotOutput("eltp", height = "100%")
+
+
+elt <- reactive({
+    inFile <- input$file1
+    if (is.null(inFile)) return(NULL)
+   data <- read.csv2(inFile$datapath)
+   df <- data %>% mutate(EE = PERSPVALUE / EXPVALUE) %>% arrange(desc(EE))
+   df
+})  
+```
+
+
+Row 
+-------------------------------------
+
+### ELT
+
+ All the information needed to generate the EP curves is stored in the ELT.
+We will assume that this ELT corresponds to the Ground Up financial perspective. 
+
+ Here we add to the ELT the field (EE) with the percentage given by the Loss generated per Event over the Exposure. And then sort the table by this field.
+
+```{r message=FALSE, echo=FALSE, comment = NA }
+DT::renderDataTable({
+   #validate(
+   #   need(!is.null(elt()), "deddededed"
+  #         )
+  req(elt())   
+  DT::datatable(elt(), 
+                options = list(pageLength = 5,
+    initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")
+    ),
+    rownames= FALSE                                 
+  ) %>% formatCurrency(c(3:6)," " , mark = " ",digits = 0) %>%
+    formatCurrency(7," " , mark = ".",digits = 5) %>%
+    formatRound('RATE', 10)
+})
+
+ 
+#reactive({ 
+  
+#dataTableOutput("table")
+```
+
+Dashboards {data-orientation=Row}
+=====================================
+
+Row {data-height=400}
+-------------------------------------
+
+### Exposure vesus Expected Loss
+
+ Here we show the top 10 most damageable Events.
+
+###
+
+```{r}
+#highchartOutput("hcontainer",height = "500px")
+  renderHighchart({
+  validate(
+      need(elt() != "", "Please upload a CSV file")
+    )   
+#    validate(need(elt(),"Dataframe not found"))
+elto <- elt() %>% arrange(desc(EE)) %>% head(n=10) %>% arrange(PERSPVALUE)
+
+hc <- highchart() %>% 
+  hc_xAxis(categories = elto$EVENTID,
+           title = list(text =  "Event")
+           #name = "Event"
+           ) %>%   
+  
+  hc_add_series(#title = list(text =  "ExpectedLoss")
+                name = "ExpectedLoss",
+                data = elto$PERSPVALUE
+                ) %>%
+  
+  hc_add_series(#title = list(text =  "Exposure"),
+                name = "Exposure",
+                data = elto$EXPVALUE
+                #labels=list(format="{value:,.0f}")
+                )   %>%
+  
+#hc_tooltip(pointFormat = '<span style="color:{series.color}">{series.name}</span>:
+#           {point.x:,.0f}   {point.y:,.0f}<br/>') 
+                     
+#this.series.name
+ hc_tooltip(formatter = JS("function(){return (
+'<b>Event ID </b>: ' + this.x + '<br> <b>' + this.series.name + '</b>: '+ Highcharts.numberFormat(this.y, 0, '.', ' '))}"))
+
+#        'Serie ' + this.series.name +   
+#       'Exposure:  ' + Highcharts.numberFormat(this.x, 0, '.', ' ')  + 
+# ' <br> ExpectedLoss: ' + Highcharts.numberFormat(this.y, 0, '.', ' '))
+  
+  
+hc <- hc %>% 
+  hc_chart(type = "column",
+           options3d = list(enabled = TRUE, beta = 15, alpha = 15))
+hc %>% 
+  hc_chart(borderColor = '#EBBA95',
+           borderRadius = 10,
+           borderWidth = 2,
+           backgroundColor = list(
+             linearGradient = c(0, 0, 500, 500),
+             stops = list(
+               list(0, 'rgb(255, 255, 255)'),
+               list(1, 'rgb(200, 200, 255)')
+             )))
+})
+```
+
+Row {data-height=30}
+-------------------------------------
+
+*** 
+Please click on the Render Return Periods Table button to see the Return Periods table and the EP curve.
+
+
+Row 
+-------------------------------------
+
+### Return Periods
+
+Return Period Losses are very valuable measures of risk when a single point
+on the curve is of importance. Three of the applications of this risk measure
+are: 
+
+1. Reinsurance analysis
+
+2. Rating agency reporting
+
+3. Primary layer analysis: Similar to a reinsurance analysis, you can use
+return period losses to understand the probabilities associated with
+activating or exhausting a policy layer.
+
+
+```{r}
+bootstrapPage(actionButton("rpfBtn", "Render Return Periods Table", class="btn-default"))
+```
+
+
+```{r message=FALSE, echo=FALSE, comment = NA}
+rpf <- eventReactive(input$rpfBtn, { 
+   
+if (is.null(elt())) return(NULL)
+  
+ l <- sum(elt()$RATE)
+
+tq <- quantile(elt()$PERSPVALUE, c(.05,0.1,0.2,0.4,0.6,0.8, 0.95))
+
+tr <- seq(min(elt()$PERSPVALUE), tq[[1]], (tq[[1]]-min(elt()$PERSPVALUE))/5)
+tr1 <- seq(tq[[1]], tq[[2]], (tq[[2]]-tq[[1]])/8)
+tr2 <- seq(tq[[2]], tq[[3]], (tq[[3]]-tq[[2]])/8)
+tr3 <- seq(tq[[3]], tq[[4]], (tq[[4]]-tq[[3]])/8)
+tr4 <- seq(tq[[4]], tq[[5]], (tq[[5]]-tq[[4]])/8)
+tr5 <- seq(tq[[5]], tq[[6]], (tq[[6]]-tq[[5]])/8)
+tr6 <- seq(tq[[6]], tq[[7]], (tq[[7]]-tq[[6]])/8)
+tr7 <- seq(tq[[7]], max(elt()$PERSPVALUE), (max(elt()$PERSPVALUE)-tq[[7]])/110)
+
+#tr <-  seq(min(elt()$PERSPVALUE)+1, max(elt()$PERSPVALUE), #(max(elt()$PERSPVALUE)-min(elt()$PERSPVALUE)+1)/1000)
+#thresholds <- c(tr)
+#thresholds <- seq(1, max(elt()$PERSPVALUE), (max(elt()$PERSPVALUE))/20)  
+
+thresholds <- c(tr,tr1,tr2,tr3,tr4,tr5,tr6,tr7)
+
+thresholds <- as.data.frame(thresholds)
+
+eltc <- elt() %>% mutate(mu    = PERSPVALUE / EXPVALUE, 
+                         sigma = (STDDEVI+STDDEVC)/EXPVALUE,
+                         alpha = ((1 - mu) / sigma^2 - 1 / mu) * mu ^ 2,
+                         beta  =  alpha * (1 / mu - 1)
+)
+
+pr <- as.numeric()
+cep <- as.numeric()
+oep <- as.numeric()
+
+for(i in 1:nrow(thresholds)){
+  for(j in 1:nrow(eltc)){
+    pr[j]  <- 1 - pbeta(thresholds[i,]/eltc$EXPVALUE[j], eltc$alpha[j],
+                        # pr[j]  <- 1 - pbeta(1/thresholds[i,], eltc$alpha[j],
+                        eltc$beta[j]) 
+  }
+  cep[i] <- sum(eltc$RATE * pr) / sum(eltc$RATE) 
+  oep[i] <- 1 - exp(-l*cep[i])
+}
+oepdf <- data.frame(thresholds=round(thresholds[,1],0),oep)
+
+return(oepdf)
+
+  })
+```
+
+###
+
+```{r message=FALSE, echo=FALSE, comment = NA }
+
+DT::renderDataTable({
+  req(rpf())   
+  
+newdataoep <- data.frame(oep =c(0.001, 0.002, 0.004, 0.005, 0.01, 0.02,
+                                0.04,0.1,0.2,0.5))
+
+
+returnPeriod <- 1/newdataoep
+
+rp0 <- approx(rpf()$oep,rpf()$thresholds, xout = newdataoep$oep, method = "linear")
+
+rp <- data.frame( rp0[[1]],
+                  returnPeriod,
+                  rp0[[2]])    
+colnames(rp) <- c("Critical Prob.",
+                  "Return Period",
+                 "OEP" )  
+
+  DT::datatable(rp, 
+                options = list(pageLength = 10,
+                               dom = 't',
+    initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")
+    ),
+    rownames= FALSE
+  ) %>% formatPercentage(1,digits = 2) %>%
+    formatCurrency(2," " , mark = " ",digits = 0) %>%
+    formatCurrency(3," " , mark = " ",digits = 0)
+
+})
+ 
+#reactive({ 
+  
+#dataTableOutput("table")
+```
+
+Row
+-------------------------------------
+
+### Average Annual Loss (AAL), Standard Deviation (SD) and Coefficient of Variation
+
+ALL - Expected value of the annual aggregate losses. Measures the overall catastrophe risk, which includes both the frequency and severity of the events
+
+SD - Measure of the volatility in the annual aggregate losses. Incorporates primary and secondary uncertainty from all events in the ELT
+
+CV - SD / AAL
+
+###
+
+```{r}
+
+DT::renderDataTable({
+  req(elt())   
+
+AAL <- sum(elt()$PERSPVALUE*elt()$RATE)
+SD <- sqrt(sum((elt()$STDDEVI + elt()$STDDEVC)^2))
+CV <- SD/AAL
+
+dfAllSd <- data.frame(AAL,
+                      SD,
+                      CV
+                     )
+
+
+colnames(dfAllSd) <- c("AAL","SD", "CV")
+  
+   DT::datatable(dfAllSd, 
+                options = list(dom = 't',
+    initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")
+    ),
+    rownames= FALSE
+  ) %>% formatCurrency(1," " , mark = " ",digits = 0) %>%
+         formatCurrency(2," " , mark = " ",digits = 0) %>%
+         formatCurrency(3," " , mark = " ",digits = 5) 
+
+})
+
+```
+
+
+Row 
+-------------------------------------
+
+### Add a different OEP
+
+```{r}
+#textInput("oep", "OEP:", "Value here")
+#bootstrapPage(actionButton("oepInsert", "OEP", class="btn-default"))
+   #   sliderInput("n", "N:", min = 10, max = 1000, value = 200,
+    #              step = 10)
+      numericInput("oep", "OEP:", "Value here")
+#      submitButton("Submit")
+bootstrapPage(actionButton("Submit", "Submit", class="btn-default"))
+
+    
+```
+
+###
+
+```{r}
+p <- eventReactive(input$Submit, {
+  validate(need(input$Submit > 0,"Please upload a CSV file and click on the Render EP Curve button"))  
+oepr2 <- data.frame(thresholds=round(rpf()$thresholds,0),
+                    oep = rpf()$oep)
+
+newoep <- data.frame(c(input$oep))
+
+returnPeriodnew <- data.frame(c(1/newoep))
+
+ap <- approx( oepr2$oep,oepr2$thresholds,
+          xout = newoep, 
+          method = "linear") 
+  #rnorm(input$oep)
+nrp <- data.frame( newoep,
+            returnPeriodnew,
+            OEP = ap[[2]])
+colnames(nrp) <- c("Critical Prob.",
+                  "Return Period",
+                 "OEP" )
+nrp
+})
+
+
+DT::renderDataTable({
+  req(p())   
+
+  DT::datatable(p(), 
+                options = list(pageLength = 10,
+                               dom = 't',
+    initComplete = JS(
+    "function(settings, json) {",
+    "$(this.api().table().header()).css({'background-color': '#000', 'color': '#fff'});",
+    "}")
+    ),
+    rownames= FALSE
+  ) %>% formatPercentage(1,digits = 2) %>%
+    formatCurrency(2," " , mark = " ",digits = 0) %>%
+    formatCurrency(3," " , mark = " ",digits = 0)
+
+})
+```
+
+Row {data-height=400}
+-------------------------------------
+
+### OEP curve
+ The Occurrence exceedance probability (OEP) curve shows the probability that the losses for at least one occurrence will exceed a threshold.
+
+ Since the OEP curve is the cumulative distribution for the largest occurrence in a year, it can be used to analyze occurrence-based situations. 
+ 
+ For example, we can calculate the probability of activating and exhausting occurrence-based contracts such as a policy or reinsurance treaty from OEP curves. In addition, the OEP curve can provide statistical information on single event covers.
+
+
+```{r}
+#bootstrapPage(actionButton("EPcurve", "Render EP Curve", class="btn-default"))
+```
+
+###
+
+```{r results='asis', message=FALSE, echo=FALSE, comment = NA}
+hc <- eventReactive(input$rpfBtn, { 
+
+#oepf   <- rpf()[sort(sample(nrow(rpf()),20)),]
+
+    hc <- hchart(rpf(),"spline",x = thresholds,y = oep*100) %>% 
+      hc_xAxis(title = list(text =  "Loss Amout"),
+           categories = rpf()$thresholds,
+           tickInterval = 100000000,
+           labels=list(format="{value:,.0f}")
+         )    %>%  
+        hc_yAxis(title = list(text =  "Occurrence Exceedance Probability"),
+           labels = list(format = "{value}%"),
+           max =100,
+           tickInterval = 20
+             ) %>%   
+  hc_tooltip(formatter = JS("function(){
+                            return ('Thresholds:  ' + 
+      Highcharts.numberFormat(this.x, 0, '.', ' ')  +
+                            ' <br> OEP: ' +
+                            Highcharts.numberFormat(this.y,2) + '%' )}"))
+  
+})
+
+renderHighchart({
+
+#validate(need(input$rpfBtn > 0,"Please upload a CSV file and click on the Render #Return Periods Table"))  
+
+ hc() %>% 
+  hc_chart(borderColor = '#EBBA95',
+           borderRadius = 10,
+           borderWidth = 2,
+           #height = 600,
+           #width = 300,
+           backgroundColor = list(
+             linearGradient = c(0, 0, 500, 500),
+             stops = list(
+               list(0, 'rgb(255, 255, 255)'),
+               list(1, 'rgb(200, 200, 255)')
+             )))
+  
+
+
+ })
+```   
+
